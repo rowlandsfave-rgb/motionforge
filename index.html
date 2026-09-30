@@ -81,7 +81,7 @@ const MediaPipeProvider={
     if(this.lm)return;
     const m=await import(`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${V}/+esm`);
     const fs=await m.FilesetResolver.forVisionTasks(`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${V}/wasm`);
-    const opts=d=>({baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',delegate:d},runningMode:'VIDEO',numPoses:1});
+    const opts=d=>({baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task',delegate:d},runningMode:'VIDEO',numPoses:1});
     try{this.lm=await m.PoseLandmarker.createFromOptions(fs,opts('GPU'))}
     catch(e){this.lm=await m.PoseLandmarker.createFromOptions(fs,opts('CPU'))}
   },
@@ -138,7 +138,7 @@ let SM=.55;function pose(world,smooth=SM){
   boneGeo.attributes.position.needsUpdate=true;
   shown=true;if(mode!=='skeleton')updAvatar();applyVis();
 }
-let hidden=false,shown=false,mode='skeleton',mats=[],segs=[],torso,head,hair;
+let hidden=false,shown=false,mode='skeleton',mats=[],segs=[],extras=[],torso,head,hair;
 $('bSkel').onclick=()=>{hidden=!hidden;applyVis();$('bSkel').textContent=hidden?'Show figure':'Hide figure'};
 /* ---------- Avatars, outfits, backgrounds ---------- */
 const av=new THREE.Group();scene.add(av);av.visible=false;
@@ -149,23 +149,31 @@ cartoon:{k:[.07,.09,.17],hs:.17,c:['#ffd166','#ff4d2e','#06a77d','#5a3a1a']},
 anime:{k:[.03,.045,.10],hs:.10,c:['#ffe3d3','#ffffff','#3a2f6b','#7b5cff']},
 flat:{k:[.035,.05,.10],hs:.10,flat:1,c:['#17212c','#2f5bff','#17212c','#17212c']}};
 const FITS={casual:['#3d8bfd','#5b6876'],armor:['#aeb6c2','#7a838f'],neon:['#ff2bd6','#19e6ff']};
-const SEG=[[11,13,0,1],[13,15,0,0],[12,14,0,1],[14,16,0,0],[23,25,1,2],[25,27,1,2],[24,26,1,2],[26,28,1,2],[27,31,1,2],[28,32,1,2],[11,12,0,1],[23,24,1,2]];
+const SEG=[[11,13,0,1],[13,15,0,0],[12,14,0,1],[14,16,0,0],[23,25,1,2],[25,27,1,2],[24,26,1,2],[26,28,1,2],[27,31,1,2],[28,32,1,2],[11,12,0,1],[23,24,1,2],[15,17,3,0],[15,19,3,0],[15,21,3,0],[16,18,3,0],[16,20,3,0],[16,22,3,0]];
+const JN=[[11,1,1.1],[12,1,1.1],[13,0,1],[14,0,1],[15,0,1.5],[16,0,1.5],[23,2,1.2],[24,2,1.2],[25,2,1],[26,2,1],[27,2,1],[28,2,1]];
+const cp=Array.from({length:33},()=>new THREE.Vector3()),LEN={};
+const CH=[[11,13],[13,15],[12,14],[14,16],[23,25],[25,27],[24,26],[26,28],[27,31],[28,32],[15,17],[15,19],[15,21],[16,18],[16,20],[16,22]];
+function fix(){cp.forEach((c,i)=>c.copy(pts[i]));CH.forEach(([a,b])=>{const k=a*40+b,d=pts[a].distanceTo(pts[b]);LEN[k]=LEN[k]?LEN[k]*.95+d*.05:d;D.subVectors(pts[b],pts[a]).normalize();cp[b].copy(cp[a]).addScaledVector(D,LEN[k])})}
 const CI=['cS','cT','cB','cH'].map($);
 function buildAv(){
   while(av.children.length)av.remove(av.children[0]);
   const s=ST[mode],C=s.flat?THREE.MeshBasicMaterial:THREE.MeshStandardMaterial;
   mats=CI.map(i=>new C({color:i.value}));
-  segs=SEG.map(([a,b,k,c])=>{const m=new THREE.Mesh(cyl,mats[c]);av.add(m);return{m,a,b,r:s.k[k]}});
+  segs=SEG.map(([a,b,k,c])=>{const m=new THREE.Mesh(cyl,mats[c]);av.add(m);return{m,a,b,r:k===3?s.k[0]*.35:s.k[k]}});
   torso=new THREE.Mesh(cyl,mats[1]);head=new THREE.Mesh(s.box?box:sph,mats[0]);hair=new THREE.Mesh(sph,mats[3]);
   hair.visible=!!s.c[3];av.add(torso,head,hair);
+  extras=[];const eyeM=new C({color:s.flat?'#ffffff':'#151515'});
+  JN.forEach(([i,c,m])=>{const o=new THREE.Mesh(sph,mats[c]);av.add(o);extras.push({o,i,r:(i<17?s.k[0]:s.k[1])*m})});
+  [[2,.16,eyeM],[5,.16,eyeM],[0,.2,mats[0]],[7,.22,mats[0]],[8,.22,mats[0]]].forEach(([i,f,mt])=>{const o=new THREE.Mesh(sph,mt);av.add(o);extras.push({o,i,r:s.hs*f})});
 }
 const A=new THREE.Vector3(),B=new THREE.Vector3(),D=new THREE.Vector3();
 function place(m,a,b,r){D.subVectors(b,a);const l=D.length();m.position.copy(a).addScaledVector(D,.5);m.scale.set(r,l||.001,r);m.quaternion.setFromUnitVectors(UP,D.normalize())}
 function updAvatar(){
-  const s=ST[mode];
-  segs.forEach(o=>place(o.m,pts[o.a],pts[o.b],o.r));
-  A.addVectors(pts[11],pts[12]).multiplyScalar(.5);B.addVectors(pts[23],pts[24]).multiplyScalar(.5);place(torso,A,B,s.k[2]);
-  head.position.addVectors(pts[7],pts[8]).multiplyScalar(.5);head.position.y+=.02;head.scale.setScalar(s.hs);
+  const s=ST[mode];fix();
+  segs.forEach(o=>place(o.m,cp[o.a],cp[o.b],o.r));
+  A.addVectors(cp[11],cp[12]).multiplyScalar(.5);B.addVectors(cp[23],cp[24]).multiplyScalar(.5);place(torso,A,B,s.k[2]);
+  extras.forEach(x=>{x.o.position.copy(x.i<=8?pts[x.i]:cp[x.i]);x.o.scale.setScalar(x.r)});
+  head.position.addVectors(pts[7],pts[8]).multiplyScalar(.5);head.position.y+=.02;head.scale.setScalar(s.hs*.92);
   hair.position.copy(head.position);hair.position.y+=s.hs*.3;hair.position.z-=s.hs*.15;hair.scale.setScalar(s.hs*1.12);
 }
 function applyVis(){const sk=mode==='skeleton';skel.visible=!hidden&&shown&&sk;av.visible=!hidden&&shown&&!sk}
